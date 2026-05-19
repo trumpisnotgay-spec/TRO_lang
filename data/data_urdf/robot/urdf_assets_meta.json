@@ -1,0 +1,12 @@
+{
+    "urdf_path": {
+        "xhand": "data/data_urdf/robot/xhand/xhand_right_extended.urdf",
+        "allegro_hand": "data/data_urdf/robot/allegro_hand/allegro_hand_right_extended.urdf",
+        "barrett_hand": "data/data_urdf/robot/barrett_hand/bhand_model_extended.urdf",
+        "shadow_hand": "data/data_urdf/robot/shadow_hand/shadow_hand_right_extended.urdf",
+        "leaphand": "data/data_urdf/robot/leaphand/leap_hand_right_extended.urdf",
+        "ability_hand": "data/data_urdf/robot/ability_hand/ability_hand_right_extended.urdf",
+        "schunk_hand": "data/data_urdf/robot/schunk_hand/schunk_svh_hand_right_extended.urdf",
+        "dclaw_gripper": "data/data_urdf/robot/dclaw_gripper/dclaw_gripper_extended.urdf"
+    }
+}

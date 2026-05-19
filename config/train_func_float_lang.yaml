@@ -1,0 +1,76 @@
+dataset:
+  batch_size: 16
+  num_workers: 4
+  data_root: '/home/tap/Data-Filter/new_log/filtered_current_train95.jsonl'
+  hand_types:
+    - 'shadow_hand'
+
+model:
+  vqvae_cfg:
+    n_embeddings: 1024
+    embedding_dim: 16
+    num_point: 25
+    num_dim: 64
+    local_decode_pts: 40
+    beta: 0.25
+  vqvae_pretrain: '/home/tap/TRO_lang/ckpt/vqvae.ckpt'
+  object_patch: 25
+  max_link_node: 25
+  robot_links:
+    allegro_hand: 20
+    barrett_hand: 10
+    shadow_hand: 22
+    leaphand: 18
+    xhand: 20
+    ability_hand: 13
+    schunk_hand: 23
+    dclaw_gripper: 11
+  bps_config:
+    bps_type: 'random_uniform'
+    n_bps_points: 124
+    radius: 1.0
+    n_dims: 3
+  N_t_training: 10
+  diffusion_config:
+    scheduling: linear
+    M: 1000
+    beta_min: 0.0001
+    beta_max: 0.02
+    ddim_steps: 100
+    ddim_eta: 1.0
+    lambda: 0.2
+  denoiser_config:
+    M: 1000
+    t_embed_dim: 128
+    V_object_dims: [3, 1, 64]
+    V_robot_dims: [3, 3, 128]
+    E_or_dims: [3, 3]
+    E_rr_dims: [3, 3]
+    v_conv_dim: 384
+    e_conv_dim: 384
+    num_layers: 6
+    c_atten_head: 6
+    out_dim: [3, 3]
+  inference_config: False
+  embodiment:
+    - 'shadow_hand'
+  mode: "train"
+  lang_encoder_path: '/home/tap/TRO_lang/hf_models/all-MiniLM-L6-v2'
+  loss_config:
+    trans_weight: 1.0
+    rot_weight: 1.0
+
+train:
+  lr: 4e-4
+  num_epoch: 200
+  warmup_steps: 1000
+  save_every: 2
+  save_steps: 500
+  log_every: 20
+  grad_clip: 1.0
+  save_dir: '/home/tap/TRO_lang/results/shadow_hand_filtered_0519'
+  project_name: 'shadow_hand_language_grasp_v1'
+  resume_from: "/home/tap/TRO_lang/results/shadow_hand_filtered_0519/ckpt/latest.pth"
+  mixed_precision: bf16
+  accumulator: 1
+  seed: 0
