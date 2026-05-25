@@ -69,7 +69,7 @@ train:
   max_steps: 30
   log_every: 5
   grad_clip: 1.0
-  save_dir: '/home/tap/TRO_lang/results/shadow_hand_filtered_trial_0519'
+  save_dir: '/home/tap/TRO_lang/results/shadow_hand_filtered_motion_trial_0519'
   project_name: 'shadow_hand_language_grasp_trial'
   resume_from: ""
   mixed_precision: bf16

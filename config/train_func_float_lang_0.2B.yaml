@@ -46,10 +46,11 @@ model:
     V_robot_dims: [3, 3, 128]
     E_or_dims: [3, 3]
     E_rr_dims: [3, 3]
-    v_conv_dim: 384
-    e_conv_dim: 384
-    num_layers: 6
+    v_conv_dim: 768
+    e_conv_dim: 768
+    num_layers: 10
     c_atten_head: 6
+    v_out_hidden_dims: [512, 256, 128]
     out_dim: [3, 3]
   inference_config: False
   embodiment:
@@ -68,8 +69,8 @@ train:
   save_steps: 500
   log_every: 20
   grad_clip: 1.0
-  save_dir: '/home/tap/TRO_lang/results/shadow_hand_filtered_motion_0519'
-  project_name: 'shadow_hand_language_grasp_v1'
+  save_dir: '/home/tap/TRO_lang/results/shadow_hand_filtered_motion_0519_0.2B'
+  project_name: 'shadow_hand_language_grasp_v2'
   resume_from: ""
   mixed_precision: bf16
   accumulator: 1

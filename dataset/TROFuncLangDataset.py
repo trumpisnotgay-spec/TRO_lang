@@ -7,6 +7,43 @@ from tqdm import tqdm
 import torch
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
+from scipy.spatial.transform import Rotation as R
+
+from utils.tro_hand_model import create_hand_model
+
+
+isaac_to_pk_link_dict = {
+    "shadow_hand": {
+        "isaac": [
+            "FFJ4", "FFJ3", "FFJ2", "FFJ1",
+            "LFJ5", "LFJ4", "LFJ3", "LFJ2", "LFJ1",
+            "MFJ4", "MFJ3", "MFJ2", "MFJ1",
+            "RFJ4", "RFJ3", "RFJ2", "RFJ1",
+            "THJ5", "THJ4", "THJ3", "THJ2", "THJ1",
+        ],
+        "pk": [
+            "FFJ4", "FFJ3", "FFJ2", "FFJ1",
+            "MFJ4", "MFJ3", "MFJ2", "MFJ1",
+            "RFJ4", "RFJ3", "RFJ2", "RFJ1",
+            "LFJ5", "LFJ4", "LFJ3", "LFJ2", "LFJ1",
+            "THJ5", "THJ4", "THJ3", "THJ2", "THJ1",
+        ],
+    }
+}
+
+
+def isaac_to_pk(raw_joint_vals, hand):
+    isaac_names = isaac_to_pk_link_dict[hand]["isaac"]
+    pk_names = isaac_to_pk_link_dict[hand]["pk"]
+    name2idx_isaac = {name: i for i, name in enumerate(isaac_names)}
+    pk_vals = np.array([raw_joint_vals[name2idx_isaac[name]] for name in pk_names], dtype=np.float32)
+
+    if hand == "shadow_hand":
+        pk_vals[0] *= -1
+        pk_vals[4] *= -1
+        pk_vals[-2] *= -1
+        pk_vals[-1] *= -1
+    return pk_vals
 
 class TROFuncDataset(Dataset):
     def __init__(
@@ -31,6 +68,10 @@ class TROFuncDataset(Dataset):
         self.num_object_points = num_object_points
         self.dtype = dtype
         self.seed = seed
+        self.hand_models = {
+            hand_type: create_hand_model(hand_type, device=torch.device("cpu"))
+            for hand_type in self.hand_types
+        }
 
         # ==========================================
         # 1. 遍历并加载所有的 map.jsonl
@@ -116,26 +157,104 @@ class TROFuncDataset(Dataset):
             pass
         return poses
 
+    def get_se3_from_trans_and_quat(self, trans, quat):
+        T = np.eye(4, dtype=np.float32)
+        T[:3, 3] = np.asarray(trans, dtype=np.float32)
+        T[:3, :3] = R.from_quat(np.asarray(quat, dtype=np.float32)).as_matrix()
+        return T
+
+    def get_se3_from_trans_and_rpy(self, trans, rpy):
+        T = np.eye(4, dtype=np.float32)
+        T[:3, 3] = np.asarray(trans, dtype=np.float32)
+        T[:3, :3] = R.from_euler("XYZ", np.asarray(rpy, dtype=np.float32)).as_matrix()
+        return T
+
+    def align_motion_to_model_root(self, motion_data, robot_name):
+        if robot_name != "shadow_hand":
+            raise NotImplementedError(f"motion_npz path is only implemented for shadow_hand, got {robot_name}")
+
+        obj_pos = motion_data["target_root_pos"].flatten()
+        obj_rot = motion_data["target_root_rot"].flatten()
+        T_obj_world = self.get_se3_from_trans_and_quat(obj_pos, obj_rot)
+        T_palm_rel = self.get_se3_from_trans_and_quat(
+            motion_data["hand_root_rel_pos"].flatten(),
+            motion_data["hand_root_rel_rot"].flatten(),
+        )
+        T_world_raw = T_obj_world @ T_palm_rel
+
+        # Keep this alignment exactly in sync with new_filter.py/filter_demo.py.
+        T_world_palm_offset = self.get_se3_from_trans_and_rpy(
+            trans=np.array([0.0, 0.0, 0.0], dtype=np.float32),
+            rpy=np.array([0.0, -1.5707963267948966, 0.0], dtype=np.float32),
+        )
+        T_world_palm = T_world_raw @ T_world_palm_offset
+
+        T_vyaw_cyl = self.get_se3_from_trans_and_rpy(
+            trans=np.array([0.0, 0.0, 0.0], dtype=np.float32),
+            rpy=np.array([0.0, 0.0, 1.57079], dtype=np.float32),
+        )
+        T_world_base = T_world_palm @ np.linalg.inv(T_vyaw_cyl)
+
+        base_trans = T_world_base[:3, 3]
+        base_rpy = R.from_matrix(T_world_base[:3, :3]).as_euler("XYZ")
+        mapped_joints = isaac_to_pk(motion_data["joint_vals"].flatten(), robot_name)
+        return np.concatenate([base_trans, base_rpy, mapped_joints], axis=-1).astype(np.float32)
+
+    def matrix_to_pose_vec(self, link_se3):
+        poses = torch.zeros((self.max_links, 6), dtype=self.dtype)
+        link_count = min(self.max_links, int(link_se3.shape[0]))
+        for i in range(link_count):
+            mat = link_se3[i].detach().cpu().numpy()
+            trans = mat[:3, 3]
+            rotvec = R.from_matrix(mat[:3, :3]).as_rotvec()
+            poses[i] = torch.from_numpy(np.concatenate([trans, rotvec], axis=0)).to(self.dtype)
+        return poses
+
+    def load_motion_target_vec(self, motion_data, robot_name):
+        q = self.align_motion_to_model_root(motion_data, robot_name)
+        q_tensor = torch.from_numpy(q).to(dtype=torch.float32).unsqueeze(0)
+        link_se3 = self.hand_models[robot_name].get_link_se3(q_tensor)
+        return self.matrix_to_pose_vec(link_se3)
+
+    def transform_object_points_with_motion(self, points, motion_data):
+        scale = float(np.asarray(motion_data.get("scale", 1.0)).reshape(-1)[0])
+        points = np.asarray(points, dtype=np.float32) * scale
+
+        T_obj_world = self.get_se3_from_trans_and_quat(
+            motion_data["target_root_pos"].flatten(),
+            motion_data["target_root_rot"].flatten(),
+        )
+        points_h = np.concatenate(
+            [points, np.ones((points.shape[0], 1), dtype=np.float32)],
+            axis=1,
+        )
+        return (T_obj_world @ points_h.T).T[:, :3].astype(np.float32)
+
     def __getitem__(self, idx):
         item = self.data_list[idx]
         
         # 1. 动态获取机械手类型
-        task_id = item["task_id"]
-        robot_name = task_id.split('_')[-1]
+        robot_name = item.get("robot_name", self.hand_types[0])
         robot_id = self.robot2id.get(robot_name, 0)
 
         # 2. 语言标注处理
         lang_anno = item["grasp_description"]["description"]
         lang_line_list = self.annotation_to_lines(lang_anno)
 
-        # 3. 目标位姿
-        target_vec = self._load_target_vec(item["retarget_json"])   
+        motion_data = None
+        if "motion_npz" in item and item["motion_npz"]:
+            motion_data = np.load(item["motion_npz"], allow_pickle=True)
+            target_vec = self.load_motion_target_vec(motion_data, robot_name)
+        else:
+            target_vec = self._load_target_vec(item["retarget_json"])
 
         # 4. 读取与采样物体点云
         glb_path = item["object_glb"]
         try:
             mesh = trimesh.load(glb_path, force='mesh', process=False)
             points, _ = trimesh.sample.sample_surface(mesh, self.num_object_points)
+            if motion_data is not None:
+                points = self.transform_object_points_with_motion(points, motion_data)
             object_pc = torch.from_numpy(points).to(self.dtype)
         except Exception as e:
             object_pc = torch.zeros((self.num_object_points, 3), dtype=self.dtype)

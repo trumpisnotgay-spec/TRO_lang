@@ -239,7 +239,7 @@ class RobotGraph(nn.Module):
         target_trans = (target_trans - centroids) / scale
         link_target_poses = torch.cat([target_trans, target_rot], dim=-1)
 
-        link_bps = self.link_embeddings[robot_name]
+        link_bps = self.link_embeddings[robot_name].to(device=device, dtype=dtype)
         link_embed = self.link_token_encoder(link_bps)
         link_robot_embeds[:, :num_link, :] = link_embed.unsqueeze(0).expand(B, -1, -1)
         link_node_masks[:, :num_link] = True
@@ -342,7 +342,7 @@ class RobotGraph(nn.Module):
             [B, self.max_link_node, self.link_embed_dim], device=device, dtype=dtype
         )
 
-        link_bps = self.link_embeddings[robot_name]
+        link_bps = self.link_embeddings[robot_name].to(device=device, dtype=dtype)
         link_embed = self.link_token_encoder(link_bps)
         link_robot_embeds[:, :num_link, :] = link_embed.unsqueeze(0).expand(B, -1, -1)
         noisy_V_R = torch.cat([noisy_V_R_trans, noisy_V_R_rot, link_robot_embeds], dim=-1)
